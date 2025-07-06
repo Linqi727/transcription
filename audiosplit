@@ -1,0 +1,44 @@
+from pydub import AudioSegment
+import math
+
+# === SETTINGS ===
+audio_file = "Topic5_lv7.mp3"
+text_file = "Topic5_lv7.txt"
+output_prefix = "Topic5_level7_part"
+part_count = 4
+part_duration_ms = 3 * 60 * 1000  # 3 minutes in milliseconds
+
+# === Load full audio and full text ===
+print("Loading audio...")
+audio = AudioSegment.from_file(audio_file)
+
+print("Loading spoken text...")
+with open(text_file, "r") as f:
+    full_text = f.read().strip()
+words = full_text.split()
+
+# === Calculate total word count and chunk size ===
+total_words = len(words)
+words_per_part = math.ceil(total_words / part_count)
+
+print(f"Total words: {total_words}")
+print(f"Words per part (approx): {words_per_part}")
+
+# === Split audio and text ===
+for i in range(part_count):
+    # Split audio
+    start_time = i * part_duration_ms
+    end_time = start_time + part_duration_ms
+    chunk_audio = audio[start_time:end_time]
+    audio_filename = f"{output_prefix}{i+1}.mp3"
+    chunk_audio.export(audio_filename, format="mp3")
+    print(f"Exported audio: {audio_filename}")
+
+    # Split text
+    word_start = i * words_per_part
+    word_end = min(word_start + words_per_part, total_words)
+    chunk_words = words[word_start:word_end]
+    text_filename = f"{output_prefix}{i+1}.txt"
+    with open(text_filename, "w") as tf:
+        tf.write(" ".join(chunk_words))
+    print(f"Exported text: {text_filename}")

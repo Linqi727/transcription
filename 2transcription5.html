@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Transcription Task</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; background: #f9f9f9; margin: 40px; color: #333; }
+    .container { max-width: 800px; margin: 0 auto; padding: 20px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 8px; }
+    h1 { text-align: center; margin-bottom: 30px; }
+    #stage-display { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 10px; }
+    #countdown-timer { font-size: 18px; color: #666; text-align: center; margin-bottom: 20px; }
+    #progress-bar { width: 0%; height: 12px; background-color: #4caf50; border-radius: 5px; margin: 10px auto 20px auto; transition: width 0.5s linear; max-width: 100%; }
+    audio { display: block; margin: 0 auto 20px; width: 100%; max-width: 600px; }
+    #transcription { width: 100%; min-height: 200px; padding: 15px; font-size: 16px; border: 1px solid #ccc; border-radius: 6px; box-shadow: inset 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    #feedback { font-size: 16px; text-align: center; color: #333; margin-top: 20px; }
+    .error { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Audio Transcription Task (Forward-Only)</h1>
+    <div id="stage-display"></div>
+    <div id="countdown-timer"></div>
+    <div id="progress-bar"></div>
+    <audio id="audio"></audio>
+    <div id="transcription" contenteditable="false"></div>
+    <div id="feedback"></div>
+  </div>
+
+  <script>
+    (function() {
+      const totalChunks = 4;
+      const audioPaths = ['Topic2_level5_part1.mp3','Topic2_level5_part2.mp3','Topic2_level5_part3.mp3','Topic2_level5_part4.mp3'];
+      const textPaths = ['Topic2_level5_part1.txt','Topic2_level5_part2.txt','Topic2_level5_part3.txt','Topic2_level5_part4.txt'];
+      const params = new URLSearchParams(window.location.search);
+      let stage = params.get('stage') || 'rest';
+      let chunk = parseInt(params.get('chunk') || '1', 10);
+
+      const stageDisplay = document.getElementById('stage-display');
+      const timerDisplay = document.getElementById('countdown-timer');
+      const progressBar = document.getElementById('progress-bar');
+      const audio = document.getElementById('audio');
+      const transcriptionDiv = document.getElementById('transcription');
+      const feedback = document.getElementById('feedback');
+
+      const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+      function normalize(text) {
+        return text.toLowerCase().replace(/[^a-z0-9\s]/gi, '').split(/\s+/).filter(Boolean);
+      }
+
+      async function loadText(idx) {
+        let txt = '';
+        try {
+          const response = await fetch(textPaths[idx - 1]);
+          if (!response.ok) throw new Error('Fetch error ' + response.status);
+          txt = await response.text();
+        } catch (e) {
+          try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', textPaths[idx - 1], false);
+            xhr.send(null);
+            if (xhr.status === 200 || xhr.status === 0) txt = xhr.responseText;
+          } catch {};
+        }
+        return normalize(txt);
+      }
+
+      function levenshtein(a,b) {
+        const m = a.length, n = b.length;
+        const dp = Array.from({ length: m+1 }, () => Array(n+1).fill(0));
+        for (let i=0; i<=m; i++) dp[i][0] = i;
+        for (let j=0; j<=n; j++) dp[0][j] = j;
+        for (let i=1; i<=m; i++) for (let j=1; j<=n; j++) {
+          dp[i][j] = Math.min(
+            dp[i-1][j]+1,
+            dp[i][j-1]+1,
+            dp[i-1][j-1] + (a[i-1]===b[j-1]?0:1)
+          );
+        }
+        return dp[m][n];
+      }
+
+      function evaluate(reference) {
+        const saveSelection = container => {
+          const sel = window.getSelection(); if (!sel.rangeCount) return 0;
+          const range = sel.getRangeAt(0).cloneRange();
+          const pre = range.cloneRange(); pre.selectNodeContents(container); pre.setEnd(range.startContainer, range.startOffset);
+          return pre.toString().length;
+        };
+        const restoreSelection = (container, offset) => {
+          let count = 0, node;
+          const range = document.createRange(); range.setStart(container, 0); range.collapse(true);
+          const stack = [container]; let found = false;
+          while (stack.length && !found) {
+            node = stack.pop();
+            if (node.nodeType === 3) {
+              const next = count + node.length;
+              if (offset <= next) { range.setStart(node, offset - count); found = true; }
+              count = next;
+            } else {
+              for (let i=node.childNodes.length-1; i>=0; i--) stack.push(node.childNodes[i]);
+            }
+          }
+          if (found) {
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+          }
+        };
+        const caretOffset = saveSelection(transcriptionDiv);
+        const typedWords = normalize(transcriptionDiv.innerText);
+        const referenceArr = window._currentReference || [];
+        const refLen = referenceArr.length;
+        const hypLen = typedWords.length;
+        const dp = Array.from({ length: refLen+1 }, () => Array(hypLen+1).fill(0));
+        for (let i=0; i<=refLen; i++) dp[i][0] = i;
+        for (let j=0; j<=hypLen; j++) dp[0][j] = j;
+        for (let i=1; i<=refLen; i++) for (let j=1; j<=hypLen; j++) {
+          dp[i][j] = Math.min(
+            dp[i-1][j]+1,
+            dp[i][j-1]+1,
+            dp[i-1][j-1] + (referenceArr[i-1]===typedWords[j-1]?0:1)
+          );
+        }
+        let i = refLen, j = hypLen, S=0, D=0, I=0;
+        while (i>0||j>0) {
+          if (i>0&&j>0&&dp[i][j]===dp[i-1][j-1]&&referenceArr[i-1]===typedWords[j-1]) {i--;j--;} 
+          else if (i>0&&j>0&&dp[i][j]===dp[i-1][j-1]+1) {S++;i--;j--;} 
+          else if (i>0&&dp[i][j]===dp[i-1][j]+1) {D++;i--;} 
+          else if (j>0&&dp[i][j]===dp[i][j-1]+1) {I++;j--;} else break;
+        }
+        const wer = ((S+D+I)/refLen*100).toFixed(1);
+        feedback.innerHTML = `WER: ${wer}% (S=${S},D=${D},I=${I})`;
+        const html = typedWords.map((w, idx) => referenceArr[idx]===w?w:`<span class='error'>${w}</span>`).join(' ');
+        transcriptionDiv.innerHTML = html;
+        restoreSelection(transcriptionDiv, caretOffset);
+      }
+
+      async function countdown(sec,label) {
+        for (let t=sec; t>0; t--) { stageDisplay.textContent = label; timerDisplay.textContent = `${t}s`; await sleep(1000);} timerDisplay.textContent='';
+      }
+
+      async function progress(duration) {
+        const step=1000, steps=duration/step;
+        for (let t=0; t<=steps; t++) { progressBar.style.width = `${(t/steps)*100}%`; await sleep(step);}      }
+
+      (async function() {
+        if (stage==='rest') {
+          await countdown(15,'Rest'); window.location=`?stage=transcribe&chunk=${chunk}`;
+        } else if (stage==='transcribe') {
+          stageDisplay.textContent=`Transcribing Chunk ${chunk}`;
+          transcriptionDiv.innerText=''; transcriptionDiv.contentEditable=true; feedback.innerHTML=''; progressBar.style.width='0%';
+          audio.src=audioPaths[chunk-1]; audio.autoplay=true; audio.load(); audio.play();
+          await Promise.all([progress(180000), sleep(180000)]);
+          audio.pause(); localStorage.setItem(`transcript_${chunk}`, transcriptionDiv.innerText);
+          window.location=`?stage=review&chunk=${chunk}`;
+        } else if (stage==='review') {
+          stageDisplay.textContent=`Review Chunk ${chunk}`;
+          transcriptionDiv.contentEditable=true; const saved=localStorage.getItem(`transcript_${chunk}`)||''; transcriptionDiv.innerText=saved;
+          feedback.innerHTML=''; progressBar.style.width='0%'; const reference=await loadText(chunk); window._currentReference=reference;
+          evaluate(reference); transcriptionDiv.addEventListener('input',()=>evaluate(reference)); audio.src=audioPaths[chunk-1]; audio.controls=true;
+          await countdown(60,'Review'); transcriptionDiv.contentEditable=false;
+          if (chunk<totalChunks) window.location=`?stage=rest&chunk=${chunk+1}`; else stageDisplay.textContent='Complete';
+        }
+      })();
+    })();
+  </script>
+</body>
+</html>
+
+
+
+
+
+
