@@ -7,6 +7,6 @@ Topic4: How to Make Stress Your Friend (Health psychology)
 Topic5: The Hidden Influence of Social Networks (Behaviour)
 
 autonomy satisfaction vs. frustration
-1. topic choice
+1. topic choice (for satisfaction, participants are allowed to choose the topics and the order of them in the experiment; for frustration, participants will be assigned the topic)
 2. playback control (Keydown listener blocks Backspace, Delete, arrow keys, Home, End.
 Input listener forces the caret to stay at the end after each character.)
